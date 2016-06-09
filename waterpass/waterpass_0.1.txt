@@ -1,0 +1,219 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices.WindowsRuntime;
+using Windows.Foundation;
+using Windows.Foundation.Collections;
+using Windows.UI.Xaml;
+using Windows.UI.Xaml.Controls;
+using Windows.UI.Xaml.Controls.Primitives;
+using Windows.UI.Xaml.Data;
+using Windows.UI.Xaml.Input;
+using Windows.UI.Xaml.Media;
+using Windows.UI.Xaml.Navigation;
+using Windows.Media.Capture;      //For MediaCapture  
+using Windows.Media.MediaProperties;  //For Encoding Image in JPEG format  
+using Windows.Storage;         //For storing Capture Image in App storage or in Picture Library  
+using Windows.UI.Xaml.Media.Imaging;  //For BitmapImage. for showing image on screen we need BitmapImage format.  
+using System.Threading;
+using Windows.Storage.Streams;
+using Windows.Phone.Media.Devices;
+using Windows.Devices.Enumeration;
+using System.Threading.Tasks;
+using Windows.UI;
+using Windows.UI.Core;
+using Windows.Phone.UI.Input;
+using Windows.Graphics.Display;
+using Windows.Media.Devices;
+using Windows.UI.Xaml.Media.Animation;
+using Windows.UI.Popups;
+using Windows.Devices.Sensors;
+using System.Text.RegularExpressions;
+
+// Документацию по шаблону элемента пустой страницы см. по адресу http://go.microsoft.com/fwlink/?LinkID=390556
+
+namespace WinPhoneAppTest
+{
+    /// <summary>
+    /// Пустая страница, которую можно использовать саму по себе или для перехода внутри фрейма.
+    /// </summary>
+    public sealed partial class Waterpass : Page
+    {
+        DispatcherTimer dt;
+        Double degrees, roll_angle;
+        Double height_my, lenght, speed;
+        Double gx, gy, gz, gsum, pitch, roll;
+        Double cor_roll, cor_pitch;
+
+        private void button_Click(object sender, RoutedEventArgs e)
+        {
+
+                cor_pitch = pitch;
+                cor_roll = roll;
+
+        }
+
+        Accelerometer _accelerometer;
+        DoubleAnimation doubleAnimation1,doubleAnimation2;
+        //Storyboard storyboard1 = new Storyboard();
+
+        public Waterpass()
+        {
+            this.InitializeComponent();
+            dt = new DispatcherTimer();
+            //dt.Tick += dispatcherTimer_Tick;
+            dt.Interval = new TimeSpan(0, 0, 5);
+            HardwareButtons.BackPressed += HardwareButtons_BackPressed;
+
+        }
+
+        /// <summary>
+        /// Вызывается перед отображением этой страницы во фрейме.
+        /// </summary>
+        /// <param name="e">Данные события, описывающие, каким образом была достигнута эта страница.
+        /// Этот параметр обычно используется для настройки страницы.</param>
+        protected async override void OnNavigatedTo(NavigationEventArgs e)
+        {
+            DisplayInformation.AutoRotationPreferences = DisplayOrientations.Portrait;
+            _accelerometer = Accelerometer.GetDefault();
+            _accelerometer.ReportInterval = 250;
+
+            if (_accelerometer != null)
+            {
+                // Establish the report interval
+                _accelerometer.ReadingChanged += new TypedEventHandler<Accelerometer, AccelerometerReadingChangedEventArgs>(ReadingChanged);
+
+            }
+            else
+            {
+                MessageDialog msgbox = new MessageDialog("No Accelerometer found", "Error");
+                await msgbox.ShowAsync();
+            }
+
+
+
+            storyboard1 = new Storyboard();
+
+            ((UIElement)image1).RenderTransform = (Transform)new TranslateTransform();
+            doubleAnimation1 = new DoubleAnimation();
+            doubleAnimation1.Duration = new Duration(new TimeSpan(0, 0, 1));
+            doubleAnimation1.To = 100;
+            doubleAnimation1.AutoReverse = true;
+            doubleAnimation1.RepeatBehavior = RepeatBehavior.Forever;
+
+            Storyboard.SetTarget((Timeline)doubleAnimation1, (DependencyObject)image1.RenderTransform);
+            Storyboard.SetTargetProperty((Timeline)doubleAnimation1, "Y");
+            ((ICollection<Timeline>)storyboard1.Children).Add((Timeline)doubleAnimation1);
+
+            storyboard2 = new Storyboard();
+
+            ((UIElement)image3).RenderTransform = (Transform)new TranslateTransform();
+            doubleAnimation2 = new DoubleAnimation();
+            doubleAnimation2.Duration = new Duration(new TimeSpan(0, 0, 1));
+            doubleAnimation2.To = 100;
+            doubleAnimation2.AutoReverse = true;
+            doubleAnimation2.RepeatBehavior = RepeatBehavior.Forever;
+
+            Storyboard.SetTarget((Timeline)doubleAnimation2, (DependencyObject)image3.RenderTransform);
+            Storyboard.SetTargetProperty((Timeline)doubleAnimation2, "X");
+            ((ICollection<Timeline>)storyboard2.Children).Add((Timeline)doubleAnimation2);
+
+        }
+
+        //get accelerometer data blyat
+        async private void ReadingChanged(object sender, AccelerometerReadingChangedEventArgs e)
+        {
+            await Dispatcher.RunAsync(CoreDispatcherPriority.Normal, () =>
+            {
+                AccelerometerReading reading = e.Reading;
+                gx = reading.AccelerationX * 9.8;
+                gy = reading.AccelerationY * 9.8;
+                gz = reading.AccelerationZ * 9.8;
+                pitch = 0;
+                roll = Math.Atan2(gx, gz);
+                pitch = Math.Atan2(gy, gz);
+                //pitch = Math.Atan(pitch/gx);
+                roll = roll * (180 / Math.PI);
+                pitch = pitch * (180 / Math.PI);
+                textBox.Text = string.Format("Y = {0:0.00} \n X = {1:0.00}", -pitch, -roll);
+                //doubleAnimation1.To = 90;
+                //doubleAnimation1.To = 100;
+                //doubleAnimation1.To = -90;
+                //doubleAnimation1.To = -100;
+                if (cor_roll == 0 && cor_pitch == 0)
+                {
+                    if (pitch > 0 && (180-pitch)<90)
+                    {
+                        doubleAnimation1.To = 180-pitch;
+                    }
+                    else if (180-pitch == 0)
+                    {
+                        doubleAnimation1.To = 0;
+                    }
+                    else if(pitch<=-90)
+                        doubleAnimation1.To = -180-pitch;
+                        //doubleAnimation1.To = -90;
+                    if (roll > 0)
+                    {
+                        doubleAnimation2.To = (180 - roll) / 1.8;
+                    }
+                    else if (roll == 0)
+                    {
+                        doubleAnimation2.To = 0;
+                    }
+                    else
+                        doubleAnimation2.To = -(180 + roll) / 1.8;
+                }
+                else
+                {
+
+                    if (pitch > 0)
+                    {
+                        doubleAnimation1.To = ((180 - pitch)-cor_pitch) / 1.8;
+                    }
+                    else if (pitch == cor_pitch)
+                    {
+                        doubleAnimation1.To = 0;
+                    }
+                    else
+                        doubleAnimation1.To = -(180 + pitch+cor_pitch) / 1.8;
+                    if (roll > 0)
+                    {
+                        doubleAnimation2.To = (180 - roll-cor_roll) / 1.8;
+                    }
+                    else if (roll == cor_roll)
+                    {
+                        doubleAnimation2.To = 0;
+                    }
+                    else
+                        doubleAnimation2.To = -(180 + roll+cor_roll) / 1.8;
+
+
+                }
+                storyboard1.Begin();
+                storyboard2.Begin();
+            });
+
+
+        }
+
+        private void HardwareButtons_BackPressed(object sender, BackPressedEventArgs e)
+        {
+            
+            Frame frame = Window.Current.Content as Frame;
+            if (frame == null)
+            {
+                return;
+            }
+
+            if (frame.CanGoBack)
+            {
+                frame.GoBack();
+                e.Handled = true;
+            }
+            //Frame.Navigate(typeof(MainPage), null);
+
+        }
+    }
+}
