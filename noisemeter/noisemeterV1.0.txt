@@ -1,0 +1,216 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices.WindowsRuntime;
+using Windows.Foundation;
+using Windows.Foundation.Collections;
+using Windows.UI.Xaml;
+using Windows.UI.Xaml.Controls;
+using Windows.UI.Xaml.Controls.Primitives;
+using Windows.UI.Xaml.Data;
+using Windows.UI.Xaml.Input;
+using Windows.UI.Xaml.Media;
+using Windows.UI.Xaml.Navigation;
+using Windows.Media.Capture;      //For MediaCapture  
+using Windows.Media.MediaProperties;  //For Encoding Image in JPEG format  
+using Windows.Storage;         //For storing Capture Image in App storage or in Picture Library  
+using Windows.UI.Xaml.Media.Imaging;  //For BitmapImage. for showing image on screen we need BitmapImage format.  
+using System.Threading;
+using Windows.Storage.Streams;
+using Windows.Phone.Media.Devices;
+using Windows.Devices.Enumeration;
+using System.Threading.Tasks;
+using Windows.UI;
+using Windows.UI.Core;
+using Windows.Graphics.Display;
+using Windows.Media.Devices;
+using Windows.UI.Popups;
+
+using Windows.Phone.UI.Input;
+using Windows.Devices.Sensors;
+using System.Text.RegularExpressions;
+
+// Документацию по шаблону элемента пустой страницы см. по адресу http://go.microsoft.com/fwlink/?LinkID=390556
+
+namespace WinPhoneAppTest
+{
+    /// <summary>
+    /// Пустая страница, которую можно использовать саму по себе или для перехода внутри фрейма.
+    /// </summary>
+    public sealed partial class Noisemeter : Page
+    {
+        private MediaCapture _mediaCaptureManager;
+        private StorageFile _recordStorageFile;
+        private bool _recording;
+        private bool _userRequestedRaw;
+        private bool _rawAudioSupported;
+        private const string audioFilename = "audio.m4a";
+        private string filename;
+        private MediaCapture capture;
+        private InMemoryRandomAccessStream buffer;
+        DispatcherTimer dt,dr;
+        int old_size,new_size;
+        bool rec=false;
+
+        public static bool Recording;
+        public Noisemeter()
+        {
+            this.InitializeComponent();
+            InitializeComponent();
+            dt = new DispatcherTimer();
+            dr = new DispatcherTimer();
+            dt.Tick += dispatcherTimer_Tick;
+            dr.Tick+= another_dispatcherTimer_Tick;
+            dt.Interval = new TimeSpan(0, 0, 1);
+            dr.Interval = new TimeSpan(0, 0, 1);
+            HardwareButtons.BackPressed += HardwareButtons_BackPressed;
+        }
+
+        /// <summary>
+        /// Вызывается перед отображением этой страницы во фрейме.
+        /// </summary>
+        /// <param name="e">Данные события, описывающие, каким образом была достигнута эта страница.
+        /// Этот параметр обычно используется для настройки страницы.</param>
+        protected  override void OnNavigatedTo(NavigationEventArgs e)
+        {
+            Record();
+            // Stop();
+            dr.Start();
+            //dt.Start();
+        }
+
+        private async void another_dispatcherTimer_Tick(object sender, object e)
+        {
+                //Stop();
+                await buffer.FlushAsync();
+                buffer.Seek(0);
+                var bytes = new byte[buffer.Size];
+                //var reader = new DataReader(buffer.GetInputStreamAt(0));
+
+            
+                //await reader.LoadAsync((uint)buffer.Size);
+                //reader.ReadBytes(bytes);
+            await buffer.ReadAsync(bytes.AsBuffer(), (uint)buffer.Size, InputStreamOptions.None);
+                Double sum = 0;
+                for (var i = 0; i < bytes.Length-1; i = i + 2)
+                {
+
+                    
+                    double sample = BitConverter.ToInt16(bytes, i) / 32768.0;
+                    sum += (sample * sample);
+                }
+                Double rms = Math.Sqrt(sum / (bytes.Length));
+                var decibel = 92.8+ 20 * Math.Log10(rms);
+                textBox1.Text = decibel.ToString();
+
+            //await buffer.FlushAsync();
+            //Record();
+            //if (time != 0)
+            //{
+            //    Stop();
+            //    Record();
+            //}
+            //else
+            //    time += 1;
+        }
+        private void dispatcherTimer_Tick(object sender, object e)
+        {
+            // Record();
+            //// Stop();
+            // dr.Start();
+        }
+        private async Task<bool> init()
+        {
+            if (buffer != null)
+            {
+                buffer.Dispose();
+            }
+            buffer = new InMemoryRandomAccessStream();
+            if (capture != null)
+            {
+                capture.Dispose();
+            }
+            try
+            {
+                MediaCaptureInitializationSettings settings = new MediaCaptureInitializationSettings
+                {
+                    StreamingCaptureMode = StreamingCaptureMode.Audio
+                    
+
+            };
+                settings.AudioProcessing = (_rawAudioSupported && _userRequestedRaw) ? Windows.Media.AudioProcessing.Raw :  Windows.Media.AudioProcessing.Default;
+                capture = new MediaCapture();
+                await capture.InitializeAsync(settings);
+                capture.RecordLimitationExceeded += (MediaCapture sender) =>
+                {
+                    Stop();
+                    throw new Exception("Exceeded Record Limitation");
+                };
+                capture.Failed += (MediaCapture sender, MediaCaptureFailedEventArgs errorEventArgs) =>
+                {
+                    Recording = false;
+                    throw new Exception(string.Format("Code: {0}. {1}", errorEventArgs.Code, errorEventArgs.Message));
+                };
+            }
+            catch (Exception ex)
+            {
+                if (ex.InnerException != null && ex.InnerException.GetType() == typeof(UnauthorizedAccessException))
+                {
+                    throw ex.InnerException;
+                }
+                throw;
+            }
+            return true;
+        }
+
+        public async void Record()
+        {
+            await init();
+            await capture.StartRecordToStreamAsync(MediaEncodingProfile.CreateM4a(AudioEncodingQuality.Auto), buffer);
+            if (Recording) throw new InvalidOperationException("cannot excute two records at the same time");
+            Recording = true;
+        }
+
+        public async void Stop()
+        {
+            await capture.StopRecordAsync();
+            await buffer.FlushAsync();
+             buffer.Seek(0);
+            //audio.SetSource(buffer, "audio/mp3");
+            Recording = false;
+        }
+        private void OnBackKeyPress(System.ComponentModel.CancelEventArgs e)
+        {
+            //base.OnBackKeyPress(e);
+            
+        }
+
+        private void button1_Click(object sender, RoutedEventArgs e)
+        {
+            Stop();
+        }
+
+        private void HardwareButtons_BackPressed(object sender, BackPressedEventArgs e)
+        {
+            Stop();
+            Frame frame = Window.Current.Content as Frame;
+            if (frame == null)
+            {
+                return;
+            }
+
+            if (frame.CanGoBack)
+            {
+                frame.GoBack();
+                e.Handled = true;
+            }
+            //Frame.Navigate(typeof(MainPage), null);
+            
+        }
+
+    }
+
+}
+    
+

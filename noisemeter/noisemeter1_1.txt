@@ -1,0 +1,388 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices.WindowsRuntime;
+using Windows.Foundation;
+using Windows.Foundation.Collections;
+using Windows.UI.Xaml;
+using Windows.UI.Xaml.Controls;
+using Windows.UI.Xaml.Controls.Primitives;
+using Windows.UI.Xaml.Data;
+using Windows.UI.Xaml.Input;
+using Windows.UI.Xaml.Media;
+using Windows.UI.Xaml.Navigation;
+using Windows.Media.Capture;      //For MediaCapture  
+using Windows.Media.MediaProperties;  //For Encoding Image in JPEG format  
+using Windows.Storage;         //For storing Capture Image in App storage or in Picture Library  
+using Windows.UI.Xaml.Media.Imaging;  //For BitmapImage. for showing image on screen we need BitmapImage format.  
+using System.Threading;
+using Windows.Storage.Streams;
+using Windows.Phone.Media.Devices;
+using Windows.Devices.Enumeration;
+using System.Threading.Tasks;
+using Windows.UI;
+using Windows.UI.Core;
+using Windows.Graphics.Display;
+using Windows.Media.Devices;
+using Windows.UI.Popups;
+
+using Windows.Phone.UI.Input;
+using Windows.Devices.Sensors;
+using System.Text.RegularExpressions;
+
+// Документацию по шаблону элемента пустой страницы см. по адресу http://go.microsoft.com/fwlink/?LinkID=390556
+
+namespace WinPhoneAppTest
+{
+    /// <summary>
+    /// Пустая страница, которую можно использовать саму по себе или для перехода внутри фрейма.
+    /// </summary>
+    public sealed partial class Noisemeter : Page
+    {
+        private MediaCapture _mediaCaptureManager;
+        private StorageFile _recordStorageFile;
+        private bool _recording;
+        private bool _userRequestedRaw;
+        private bool _rawAudioSupported;
+        private const string audioFilename = "audio.m4a";
+        private string filename;
+        private MediaCapture capture;
+        private InMemoryRandomAccessStream buffer;
+        IRandomAccessStream _audio;
+        DispatcherTimer dt,dr;
+        int counter;
+        Double decibel;
+        ulong old_size, new_size, buf_count;
+        bool rec=false;
+
+        public static bool Recording;
+        public Noisemeter()
+        {
+            this.InitializeComponent();
+            InitializeComponent();
+            dt = new DispatcherTimer();
+            dr = new DispatcherTimer();
+            dt.Tick += dispatcherTimer_Tick;
+            dr.Tick+= another_dispatcherTimer_Tick;
+            dt.Interval = new TimeSpan(0, 0, 1);
+            dr.Interval = new TimeSpan(0,0,0,1);
+            HardwareButtons.BackPressed += HardwareButtons_BackPressed;
+        }
+
+        /// <summary>
+        /// Вызывается перед отображением этой страницы во фрейме.
+        /// </summary>
+        /// <param name="e">Данные события, описывающие, каким образом была достигнута эта страница.
+        /// Этот параметр обычно используется для настройки страницы.</param>
+        protected async override void OnNavigatedTo(NavigationEventArgs e)
+        {
+            String fileName = "max04.wav";
+            //var folders = await KnownFolders.RemovableDevices.GetFoldersAsync();
+            _recordStorageFile = await KnownFolders.MusicLibrary.CreateFileAsync(fileName, CreationCollisionOption.GenerateUniqueName);
+
+            MediaCaptureInitializationSettings settings = new MediaCaptureInitializationSettings
+            {
+                StreamingCaptureMode = StreamingCaptureMode.Audio
+
+
+            };
+            settings.AudioProcessing = (_rawAudioSupported && _userRequestedRaw) ? Windows.Media.AudioProcessing.Raw : Windows.Media.AudioProcessing.Default;
+            capture = new MediaCapture();
+            await capture.InitializeAsync(settings);
+            _audio = new InMemoryRandomAccessStream();
+           // _audio = ;
+            await capture.StartRecordToStreamAsync(MediaEncodingProfile.CreateWav(AudioEncodingQuality.Medium),_audio);
+            //await capture.StartRecordToStorageFileAsync(MediaEncodingProfile.CreateWav(AudioEncodingQuality.Low), this._recordStorageFile);
+
+            // Record();
+            // Stop();
+            dr.Start();
+            //dt.Start();
+        }
+
+        private async void another_dispatcherTimer_Tick(object sender, object e)
+        {
+
+            await capture.StopRecordAsync();
+            //buffer.Seek(0);
+             //_audio = await _recordStorageFile.OpenAsync(FileAccessMode.Read);
+            //var bytes = new byte[buffer.Size];
+            // _audio = buffer.CloneStream();
+            await _audio.FlushAsync();
+            _audio.Seek(0);
+            Byte[] bytes = new byte[_audio.Size];
+            var reader = new DataReader(_audio.GetInputStreamAt(0));
+
+            reader.ByteOrder = Windows.Storage.Streams.ByteOrder.LittleEndian;
+            await reader.LoadAsync((uint)_audio.Size);
+            reader.ReadBytes(bytes);
+//            if (BitConverter.IsLittleEndian)
+  //              Array.Reverse(bytes);
+            // await _audio.ReadAsync(bytes.AsBuffer(), (uint)buffer.Size, InputStreamOptions.None);
+                int max = 0;
+            int[] count = new int[500];
+                int sample = 0;
+            int k = 0;
+                for (var i = 100; i < (int)_audio.Size - 1; i = i + 2)
+            {
+                sample = BitConverter.ToInt16(bytes, i);
+
+                if (i == 0 || i == 12 || i == 48 || i == 64 || i == 2 || i == 14 || i == 74 || i == 76 || i == 8 || i == 10 || i == 6 || i == 16 || i == 50 || i == 60)
+                    continue;
+                else if (sample > max)
+                {
+                    max = sample;
+                        count[k] = i;
+                        k++;
+                    
+                }
+
+
+            }
+                //Double rms = Math.Sqrt(sum / (bytes.Length));
+                //var decibel = 92.8 + 20 * Math.Log10(rms);
+               // var ampl = 0.00911881965;
+                decibel = 20 * Math.Log10(max);
+                textBox1.Text = decibel.ToString();
+            _audio.Dispose();
+            _audio = new InMemoryRandomAccessStream();
+            await capture.StartRecordToStreamAsync(MediaEncodingProfile.CreateWav(AudioEncodingQuality.Medium), _audio);
+
+            //await capture.StartRecordToStreamAsync(MediaEncodingProfile.CreateWav(AudioEncodingQuality.Medium), buffer);
+            //await capture.StartRecordToStreamAsync(MediaEncodingProfile.CreateWav(AudioEncodingQuality.Medium), _audio);
+            // await Windows.Storage.FileIO.WriteBytesAsync(_recordStorageFile, bytes);
+            // dr.Stop();
+            ////TEST
+            // String fileName = "audio_new.wav";
+            //var  _recordStorageFile1 = await KnownFolders.MusicLibrary.CreateFileAsync(fileName, CreationCollisionOption.GenerateUniqueName);
+
+            // using (IRandomAccessStream fileStream = await _recordStorageFile.OpenAsync(FileAccessMode.ReadWrite))
+            // {
+            //     using (IOutputStream outputStream = fileStream.GetOutputStreamAt(0))
+            //     {
+            //         using (DataWriter dataWriter = new DataWriter(outputStream))
+            //         {
+            //             dataWriter.WriteBytes(bytes);
+            //             await dataWriter.StoreAsync();
+            //             dataWriter.DetachStream();
+
+            //         }
+            //         //await outputStream.FlushAsync();
+            //     }
+            //     //await fileStream.FlushAsync();
+            // }
+            // var stream = await _recordStorageFile1.OpenAsync(FileAccessMode.Read);
+
+            // audio.SetSource(stream, "audio/mp3");
+
+            //Record();
+            //if (time != 0)
+            //{
+
+            //    Record();
+            //}
+            //else
+            //    time += 1;
+        }
+        private void dispatcherTimer_Tick(object sender, object e)
+        {
+            // Record();
+            //// Stop();
+            // dr.Start();
+        }
+        private async Task<bool> init()
+        {
+            if (buffer != null)
+            {
+                buffer.Dispose();
+            }
+            buffer = new InMemoryRandomAccessStream();
+            if (capture != null)
+            {
+                capture.Dispose();
+            }
+            try
+            {
+                MediaCaptureInitializationSettings settings = new MediaCaptureInitializationSettings
+                {
+                    StreamingCaptureMode = StreamingCaptureMode.Audio
+                    
+
+            };
+                settings.AudioProcessing = (_rawAudioSupported && _userRequestedRaw) ? Windows.Media.AudioProcessing.Raw :  Windows.Media.AudioProcessing.Default;
+                capture = new MediaCapture();
+                await capture.InitializeAsync(settings);
+                capture.RecordLimitationExceeded += (MediaCapture sender) =>
+                {
+                    Stop();
+                    throw new Exception("Exceeded Record Limitation");
+                };
+                capture.Failed += (MediaCapture sender, MediaCaptureFailedEventArgs errorEventArgs) =>
+                {
+                    Recording = false;
+                    throw new Exception(string.Format("Code: {0}. {1}", errorEventArgs.Code, errorEventArgs.Message));
+                };
+            }
+            catch (Exception ex)
+            {
+                if (ex.InnerException != null && ex.InnerException.GetType() == typeof(UnauthorizedAccessException))
+                {
+                    throw ex.InnerException;
+                }
+                throw;
+            }
+            return true;
+        }
+
+        public async void Record()
+        {
+            //String fileName = "record.wav";
+            //_recordStorageFile = await KnownFolders.VideosLibrary.CreateFileAsync(fileName, CreationCollisionOption.GenerateUniqueName);
+            //await capture.StartRecordToStorageFileAsync(MediaEncodingProfile.CreateWav(AudioEncodingQuality.Low), this._recordStorageFile);
+
+
+            await init();
+            await capture.StartRecordToStreamAsync(MediaEncodingProfile.CreateWav(AudioEncodingQuality.Medium), buffer);
+            if (Recording) throw new InvalidOperationException("cannot excute two records at the same time");
+            Recording = true;
+        }
+
+        public async void Stop()
+        {
+            //dr.Stop();
+            await capture.StopRecordAsync();
+            await buffer.FlushAsync();
+             buffer.Seek(0);
+            ////old almost working
+            //var bytes = new byte[buffer.Size];
+            //await buffer.ReadAsync(bytes.AsBuffer(), (uint)buffer.Size, InputStreamOptions.None);
+            //Double sum = 0;
+            //for (var i = 0; i < bytes.Length - 1; i = i + 2)
+            //{
+
+
+            //    double sample = BitConverter.ToInt16(bytes, i) / 32768.0;
+            //    sum += (sample * sample);
+            //}
+            //Double rms = Math.Sqrt(sum / (bytes.Length));
+            //var decibel = 92.8 + 20 * Math.Log10(rms);
+            //textBox1.Text = decibel.ToString();
+            //audio.SetSource(buffer, "audio/mp3");
+            Recording = false;
+        }
+
+        private void button_Click(object sender, RoutedEventArgs e)
+        {
+            Record();
+            //dr.Start();
+        }
+
+        private async void button2_Click(object sender, RoutedEventArgs e)
+        {
+            String fileName = "audio.wav";
+            _recordStorageFile = await KnownFolders.MusicLibrary.GetFileAsync(fileName);
+
+
+            var stream = await _recordStorageFile.OpenAsync(FileAccessMode.Read);
+            //audio.SetSource(stream, "audio/mp3");
+            //audio.Play();
+            //old almost working
+            var bytes = new byte[stream.Size];
+            stream.Seek(0);
+            await stream.ReadAsync(bytes.AsBuffer(), (uint)stream.Size, InputStreamOptions.None);
+            //Double sum = 0;
+            Double max=0,channels,samplerate;
+            
+            for (var i = 22; i < bytes.Length - 1; i = i + 2)
+            {
+                double sample = BitConverter.ToInt16(bytes, i);
+                if(i==22)
+                {
+                    channels= BitConverter.ToInt16(bytes, i);
+                    
+                }
+                else if(i==24)
+                {
+
+                    samplerate = BitConverter.ToInt32(bytes, i);
+                    i += 4;
+                }
+
+                else if (i == 40)
+                    max = sample;
+                if (i > 40)
+                {
+                    if (sample > max)
+                        max = sample;
+
+                }
+            }
+            //Double rms = Math.Sqrt(sum / (bytes.Length));
+            //var decibel = 92.8 + 20 * Math.Log10(rms);
+            //textBox1.Text = decibel.ToString();
+            //Double max=0;
+            //for (var i = 0; i < bytes.Length - 1; i = i + 4)
+            //{
+            //    double sample = BitConverter.ToInt32(bytes, i);
+            //    if (i == 0)
+            //        max = sample;
+            //    else if (sample > max)
+            //        max = sample;
+
+            //}
+            //huyna//
+            //var max = bytes[0];
+            //for (var i = 0; i < bytes.Length; i = i + 1)
+            //{
+            //    if (bytes[i] > max)
+            //        max = bytes[i];
+            //}
+            var ampl = 0.00911881965;
+            var db = 20 * Math.Log10(getAmplitudeEMA(max) / ampl);
+            textBox1.Text = db.ToString();
+            //bytes = null;
+        }
+
+        private Double getAmplitudeEMA(Double amp)
+        {
+
+            var mEMA = 0.0;
+            mEMA = 0.6 * amp + (1.0 - 0.6) * mEMA;
+            return mEMA;
+
+        }
+        private void OnBackKeyPress(System.ComponentModel.CancelEventArgs e)
+        {
+            //base.OnBackKeyPress(e);
+            
+        }
+
+        private void button1_Click(object sender, RoutedEventArgs e)
+        {
+            Stop();
+        }
+
+        private void HardwareButtons_BackPressed(object sender, BackPressedEventArgs e)
+        {
+            Stop();
+            Frame frame = Window.Current.Content as Frame;
+            if (frame == null)
+            {
+                return;
+            }
+
+            if (frame.CanGoBack)
+            {
+                frame.GoBack();
+                e.Handled = true;
+            }
+            //Frame.Navigate(typeof(MainPage), null);
+            
+        }
+
+    }
+
+}
+    
+
